@@ -107,6 +107,84 @@ class GpxSplitterTests(unittest.TestCase):
                 "kept",
             )
 
+    def test_hiking_defaults_use_one_hour_and_ten_kilometres(self) -> None:
+        source = f"""<gpx xmlns="{GPX_NAMESPACE}" version="1.1" creator="test">
+  <trk>
+    <name>Time defaults</name>
+    <trkseg>
+      <trkpt lat="0" lon="0"><time>2026-07-01T10:00:00Z</time></trkpt>
+      <trkpt lat="0" lon="0.01"><time>2026-07-01T11:00:00Z</time></trkpt>
+      <trkpt lat="0" lon="0.02"><time>2026-07-01T12:00:01Z</time></trkpt>
+    </trkseg>
+  </trk>
+  <trk>
+    <name>Distance defaults</name>
+    <trkseg>
+      <trkpt lat="0" lon="0"/>
+      <trkpt lat="0" lon="0.05"/>
+      <trkpt lat="0" lon="0.15"/>
+    </trkseg>
+  </trk>
+</gpx>"""
+
+        with tempfile.TemporaryDirectory() as temporary_directory_name:
+            temporary_directory = Path(temporary_directory_name)
+            input_path = self.write_input(temporary_directory, source)
+            outputs = split_gpx_tracks(input_path, temporary_directory / "output")
+
+            self.assertEqual(
+                [path.name for path in outputs],
+                [
+                    "2026-07-01_Time defaults_1.gpx",
+                    "2026-07-01_Time defaults_2.gpx",
+                    "Distance defaults_1.gpx",
+                    "Distance defaults_2.gpx",
+                ],
+            )
+            self.assertEqual(
+                self.parse_output(outputs[0]).xpath(
+                    "count(/gpx:gpx/gpx:trk/gpx:trkseg/gpx:trkpt)",
+                    namespaces=NAMESPACES,
+                ),
+                2.0,
+            )
+            self.assertEqual(
+                self.parse_output(outputs[2]).xpath(
+                    "count(/gpx:gpx/gpx:trk/gpx:trkseg/gpx:trkpt)",
+                    namespaces=NAMESPACES,
+                ),
+                2.0,
+            )
+
+    def test_does_not_split_when_time_moves_backwards(self) -> None:
+        source = f"""<gpx xmlns="{GPX_NAMESPACE}" version="1.1" creator="test">
+  <trk>
+    <name>Backwards time</name>
+    <trkseg>
+      <trkpt lat="1" lon="1"><time>2026-07-02T00:30:00Z</time></trkpt>
+      <trkpt lat="1.01" lon="1.01"><time>2026-07-01T23:30:00Z</time></trkpt>
+      <trkpt lat="1.02" lon="1.02"><time>2026-07-01T23:45:00Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>"""
+
+        with tempfile.TemporaryDirectory() as temporary_directory_name:
+            temporary_directory = Path(temporary_directory_name)
+            input_path = self.write_input(temporary_directory, source)
+            outputs = split_gpx_tracks(input_path, temporary_directory / "output")
+
+            self.assertEqual(
+                [path.name for path in outputs],
+                ["2026-07-02_Backwards time_1.gpx"],
+            )
+            self.assertEqual(
+                self.parse_output(outputs[0]).xpath(
+                    "count(/gpx:gpx/gpx:trk/gpx:trkseg/gpx:trkpt)",
+                    namespaces=NAMESPACES,
+                ),
+                3.0,
+            )
+
     def test_preserves_multiple_segment_boundaries_without_forcing_a_split(self) -> None:
         source = f"""<gpx xmlns="{GPX_NAMESPACE}" version="1.1" creator="test">
   <trk>
