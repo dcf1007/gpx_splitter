@@ -16,7 +16,7 @@ For each GPX file, the script performs the following steps:
 6. Measures how much of the GPX lies close to each route and how close the GPX passes to each landmark.
 7. Ranks the resulting route and landmark candidates.
 8. Writes summary and detailed reports.
-9. When at least two visited highlights are detected, writes an enriched copy of the original GPX into the output directory.
+9. Writes an enriched copy of every successfully analyzed GPX into the output directory, adding visited feature waypoints and highlight text when available.
 
 There is no local trail catalog, response cache, mocked runtime data, or offline fallback. If all configured Overpass endpoints fail, the command exits with an error and does not silently create partial identification results.
 
@@ -74,7 +74,7 @@ The script creates:
 - `trail_identification.json` — complete statistics, candidates, landmarks, tags, warnings, and API metadata;
 - `trail_identification.geojson` — GPX lines and nearby landmark points;
 - `trail_identification.html` — an interactive Leaflet map using OpenStreetMap background tiles;
-- an enriched GPX copy for any track with at least two visited highlights.
+- one enriched GPX copy for every successfully analyzed track.
 
 The HTML report requires an internet connection when opened because it loads Leaflet and map tiles from public services.
 
@@ -123,9 +123,9 @@ Multiple GPX tracks found in example.gpx; trail identification requires exactly 
 
 After identification, the script collects visited named highlights. Highlights include named natural and tourism features such as caves, springs, waterfalls, water features, peaks, saddles, rocks, cliffs, viewpoints, attractions, information points, picnic sites, huts, and nature reserves. Parking areas are not treated as highlights for choosing the main highlight or output filename.
 
-When at least two unique highlights were visited, the script writes a copy of the original GPX into the results directory. The original GPX is not modified.
+The script always writes a copy of every successfully analyzed GPX into the results directory, regardless of whether zero, one, or several highlights were visited. The original GPX is not modified.
 
-The copy's track-level `<desc>` field is created or extended with a short description such as:
+When at least one highlight was visited, the copy's track-level `<desc>` field is created or extended with a short description such as:
 
 ```text
 Main highlight: Cueva Serena. Other visited highlights: Mirador del Bosque; Cascada Alta.
@@ -140,19 +140,20 @@ The copy also contains root-level GPX `<wpt>` elements for every visited relevan
 
 Waypoints already present in the source GPX are preserved. A generated waypoint is skipped when the source already contains a waypoint with the same name.
 
-The highest-ranked visited highlight is used as the main highlight. The output filename is:
+The output filename uses the highest-ranked visited highlight when one exists. Otherwise it uses the best matched trail name, and if no match exists it uses the GPX track name. The output filename is:
 
 ```text
-YYYY-MM-DD_Main-highlight.gpx
+YYYY-MM-DD_Preferred-name.gpx
 ```
 
-The date is taken from the first valid metadata or track-point timestamp in GPX document order. When no valid timestamp exists, the date prefix is omitted. Spaces in the main highlight are replaced with dashes, and characters that are unsafe in filenames are also replaced.
+The date is taken from the first valid metadata or track-point timestamp in GPX document order. When no valid timestamp exists, the date prefix is omitted. Spaces in the selected highlight, trail, or track name are replaced with dashes, and characters that are unsafe in filenames are also replaced.
 
 Examples:
 
 ```text
 2025-05-06_Main-Cave.gpx
-Cueva-Serena.gpx
+2025-05-06_River-Trail.gpx
+Woodland-Walk.gpx
 ```
 
 If two input files would produce the same filename in one run, the later file receives a numeric suffix such as `_2`.

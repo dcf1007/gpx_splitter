@@ -89,7 +89,7 @@ class TrailIdentifierTests(unittest.TestCase):
             )
 
             output_directory = directory / "results"
-            output_paths = identify_trails.write_highlight_copies(
+            output_paths = identify_trails.write_enriched_copies(
                 [identification],
                 [source_path],
                 output_directory,
@@ -138,6 +138,128 @@ class TrailIdentifierTests(unittest.TestCase):
                 ],
                 waypoint_types,
             )
+
+
+    def test_one_highlight_still_creates_an_enriched_copy(self) -> None:
+        gpx = """<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><time>2025-07-08T09:00:00Z</time></metadata>
+  <trk>
+    <name>Walk</name>
+    <trkseg><trkpt lat="40.0" lon="-3.0"/></trkseg>
+  </trk>
+</gpx>
+"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source_path = directory / "source.gpx"
+            source_path.write_text(gpx, encoding="utf-8")
+            analysis = identify_trails.analyze_track(source_path)
+            identification = identify_trails.Identification(
+                analysis=analysis,
+                best_match=None,
+                candidates=[],
+                landmarks=[
+                    identify_trails.Landmark(
+                        "cave",
+                        "Main Cave",
+                        "natural=cave_entrance",
+                        40.0,
+                        -3.0,
+                        5.0,
+                        True,
+                        180.0,
+                    ),
+                    identify_trails.Landmark(
+                        "parking",
+                        "Parking Area",
+                        "amenity=parking",
+                        40.0,
+                        -3.0,
+                        10.0,
+                        True,
+                        180.0,
+                    ),
+                ],
+                warnings=[],
+                overpass_endpoint="test",
+                osm_timestamp=None,
+            )
+
+            output_paths = identify_trails.write_enriched_copies(
+                [identification], [source_path], directory / "results"
+            )
+
+            self.assertEqual(
+                [directory / "results" / "2025-07-08_Main-Cave.gpx"],
+                output_paths,
+            )
+            tree = etree.parse(str(output_paths[0]))
+            description = tree.xpath(
+                'string(/*[local-name()="gpx"]/*[local-name()="trk"]/*[local-name()="desc"])'
+            )
+            self.assertEqual("Main highlight: Main Cave.", description)
+            waypoint_names = tree.xpath(
+                '/*[local-name()="gpx"]/*[local-name()="wpt"]/'
+                '*[local-name()="name"]/text()'
+            )
+            self.assertEqual(["Main Cave", "Parking Area"], waypoint_names)
+
+    def test_no_highlights_still_creates_a_copy_with_feature_waypoints(self) -> None:
+        gpx = """<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><time>2025-09-10T09:00:00Z</time></metadata>
+  <trk>
+    <name>Woodland Walk</name>
+    <desc>Original description.</desc>
+    <trkseg><trkpt lat="40.0" lon="-3.0"/></trkseg>
+  </trk>
+</gpx>
+"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source_path = directory / "source.gpx"
+            source_path.write_text(gpx, encoding="utf-8")
+            analysis = identify_trails.analyze_track(source_path)
+            identification = identify_trails.Identification(
+                analysis=analysis,
+                best_match=None,
+                candidates=[],
+                landmarks=[
+                    identify_trails.Landmark(
+                        "parking",
+                        "Trailhead Parking",
+                        "amenity=parking",
+                        40.0,
+                        -3.0,
+                        4.0,
+                        True,
+                        180.0,
+                    )
+                ],
+                warnings=[],
+                overpass_endpoint="test",
+                osm_timestamp=None,
+            )
+
+            output_paths = identify_trails.write_enriched_copies(
+                [identification], [source_path], directory / "results"
+            )
+
+            self.assertEqual(
+                [directory / "results" / "2025-09-10_Woodland-Walk.gpx"],
+                output_paths,
+            )
+            tree = etree.parse(str(output_paths[0]))
+            description = tree.xpath(
+                'string(/*[local-name()="gpx"]/*[local-name()="trk"]/*[local-name()="desc"])'
+            )
+            self.assertEqual("Original description.", description)
+            waypoint_names = tree.xpath(
+                '/*[local-name()="gpx"]/*[local-name()="wpt"]/'
+                '*[local-name()="name"]/text()'
+            )
+            self.assertEqual(["Trailhead Parking"], waypoint_names)
 
 
 if __name__ == "__main__":
