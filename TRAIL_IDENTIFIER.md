@@ -113,7 +113,7 @@ A landmark candidate identifies a named place the track appears to visit. It doe
 
 Each input file must contain exactly one root-level GPX `<trk>` element. Multiple track segments inside that track are allowed, but multiple `<trk>` elements are not.
 
-All input GPX files are structurally validated before any live Overpass request is made. When any input file contains more than one track, the complete command stops and reports an error such as:
+When any input file contains more than one track, the command stops before making live Overpass requests and reports an error such as:
 
 ```text
 Multiple GPX tracks found in example.gpx; trail identification requires exactly one <trk> element
@@ -121,7 +121,7 @@ Multiple GPX tracks found in example.gpx; trail identification requires exactly 
 
 ## Highlight-enriched GPX copies
 
-After identification, the script collects visited named highlights. Highlights include named natural and tourism features such as caves, springs, waterfalls, water features, peaks, saddles, rocks, cliffs, viewpoints, attractions, information points, picnic sites, huts, and nature reserves. Parking areas and settlements are not treated as highlights for this purpose.
+After identification, the script collects visited named highlights. Highlights include named natural and tourism features such as caves, springs, waterfalls, water features, peaks, saddles, rocks, cliffs, viewpoints, attractions, information points, picnic sites, huts, and nature reserves. Parking areas are not treated as highlights for choosing the main highlight or output filename.
 
 When at least two unique highlights were visited, the script writes a copy of the original GPX into the results directory. The original GPX is not modified.
 
@@ -130,6 +130,15 @@ The copy's track-level `<desc>` field is created or extended with a short descri
 ```text
 Main highlight: Cueva Serena. Other visited highlights: Mirador del Bosque; Cascada Alta.
 ```
+
+The copy also contains root-level GPX `<wpt>` elements for every visited relevant landmark. This includes all visited highlights and visited named parking areas. Each generated waypoint contains:
+
+- its OpenStreetMap latitude and longitude;
+- a `<name>` with the landmark name;
+- a `<desc>` with the feature category and distance from the recorded track;
+- a `<type>` containing the OpenStreetMap category, such as `tourism=viewpoint` or `amenity=parking`.
+
+Waypoints already present in the source GPX are preserved. A generated waypoint is skipped when the source already contains a waypoint with the same name.
 
 The highest-ranked visited highlight is used as the main highlight. The output filename is:
 
@@ -175,8 +184,6 @@ For each GPX file, the command prints:
 - the number of candidates and landmarks found;
 - the OSM base timestamp;
 - warnings for malformed, missing, reverse, or mixed timestamps and for open tracks.
-
-Generated highlight GPX copies are listed in the `Outputs` section as `highlight_gpx` entries.
 
 An `unmatched` result after a successful live query means no candidate reached the minimum score. It is different from an API failure, which terminates the command with an error.
 
