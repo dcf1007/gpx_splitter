@@ -327,8 +327,8 @@ def write_subtrack(
 def split_gpx_tracks(
     input_path: Path,
     output_directory: Path,
-    time_gap_hours: float = 6.0,
-    distance_gap_km: float = 100.0,
+    time_gap_hours: float = 1.0,
+    distance_gap_km: float = 10.0,
     overwrite: bool = False,
 ) -> list[Path]:
     """Split every GPX track according to date, timestamp gap, or distance gap."""
@@ -478,11 +478,14 @@ def split_gpx_tracks(
                         timestamp_difference_seconds = (
                             current_timestamp - previous_timestamp
                         ).total_seconds()
-                        should_split = (
-                            current_timestamp.date() != previous_timestamp.date()
-                            or timestamp_difference_seconds < 0
-                            or timestamp_difference_seconds > time_gap_seconds
-                        )
+
+                        # Backward-moving timestamps are retained as-is. They do not
+                        # trigger either the date-change rule or the time-gap rule.
+                        if timestamp_difference_seconds >= 0:
+                            should_split = (
+                                current_timestamp.date() != previous_timestamp.date()
+                                or timestamp_difference_seconds > time_gap_seconds
+                            )
                     elif previous_coordinate is not None and current_coordinate is not None:
                         distance_km = calculate_distance_km(
                             previous_coordinate,
@@ -686,16 +689,16 @@ def main() -> int:
     parser.add_argument(
         "--time-gap-hours",
         type=float,
-        default=6.0,
-        help="Split timed points when the gap exceeds this many hours (default: 6).",
+        default=1.0,
+        help="Split timed points when the gap exceeds this many hours (default: 1).",
     )
     parser.add_argument(
         "--distance-gap-km",
         type=float,
-        default=100.0,
+        default=10.0,
         help=(
             "When either consecutive point lacks a valid timestamp, split if their "
-            "distance exceeds this value in kilometres (default: 100)."
+            "distance exceeds this value in kilometres (default: 10)."
         ),
     )
     parser.add_argument(
