@@ -46,6 +46,9 @@ HIGHLIGHT_CATEGORIES = {
     "tourism=alpine_hut",
     "leisure=nature_reserve",
 }
+WAYPOINT_CATEGORIES = HIGHLIGHT_CATEGORIES | {
+    "amenity=parking",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -392,8 +395,6 @@ def request_osm(
     padding_m: float,
     timeout_seconds: float,
 ) -> tuple[dict[str, Any], str]:
-    if not urls:
-        raise ValueError("At least one Overpass URL is required")
     body = urllib.parse.urlencode(
         {"data": overpass_query(analysis.bounds, padding_m)}
     ).encode("utf-8")
@@ -404,9 +405,7 @@ def request_osm(
             data=body,
             headers={
                 "User-Agent": USER_AGENT,
-                "Content-Type": (
-                    "application/x-www-form-urlencoded; charset=UTF-8"
-                ),
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "Accept": "application/json",
             },
             method="POST",
@@ -457,9 +456,13 @@ def point_segment_distance(
     dy = ey - sy
     if dx == dy == 0:
         return math.hypot(px - sx, py - sy)
-    fraction = ((px - sx) * dx + (py - sy) * dy) / (dx * dx + dy * dy)
+    fraction = ((px - sx) * dx + (py - sy) * dy) / (
+        dx * dx + dy * dy
+    )
     fraction = min(1.0, max(0.0, fraction))
-    return math.hypot(px - (sx + fraction * dx), py - (sy + fraction * dy))
+    return math.hypot(
+        px - (sx + fraction * dx), py - (sy + fraction * dy)
+    )
 
 
 def sampled_points(
@@ -468,11 +471,15 @@ def sampled_points(
     if len(points) <= maximum:
         return list(points)
     step = (len(points) - 1) / (maximum - 1)
-    indexes = sorted({round(index * step) for index in range(maximum)})
-    return [points[index] for index in indexes]
+    return [
+        points[index]
+        for index in sorted({round(i * step) for i in range(maximum)})
+    ]
 
 
-def feature_coordinate(element: dict[str, Any]) -> tuple[float, float] | None:
+def feature_coordinate(
+    element: dict[str, Any],
+) -> tuple[float, float] | None:
     latitude = element.get("lat")
     longitude = element.get("lon")
     if latitude is None or longitude is None:
@@ -482,9 +489,9 @@ def feature_coordinate(element: dict[str, Any]) -> tuple[float, float] | None:
     if latitude is None or longitude is None:
         geometry = element.get("geometry") or []
         if geometry:
-            latitude = sum(
-                float(point["lat"]) for point in geometry
-            ) / len(geometry)
+            latitude = sum(float(point["lat"]) for point in geometry) / len(
+                geometry
+            )
             longitude = sum(
                 float(point["lon"]) for point in geometry
             ) / len(geometry)
@@ -553,18 +560,15 @@ def route_candidate(
     ) / len(distances)
     median = statistics.median(distances)
     proximity = max(
-        0.0,
-        1.0 - median / max(match_radius_m * 3, 1.0),
+        0.0, 1.0 - median / max(match_radius_m * 3, 1.0)
     )
     score = 0.8 * coverage + 0.2 * proximity
     relation_id = element.get("id")
     return Candidate(
         identifier=f"osm_relation_{relation_id}",
-        name=(
-            tags.get("name")
-            or tags.get("ref")
-            or f"OSM route {relation_id}"
-        ),
+        name=tags.get("name")
+        or tags.get("ref")
+        or f"OSM route {relation_id}",
         source="openstreetmap_route",
         score=score,
         confidence=confidence(score),
@@ -611,7 +615,8 @@ def landmark_from_element(
 def landmark_score(landmark: Landmark) -> float:
     proximity = max(
         0.0,
-        1.0 - landmark.distance_m / max(landmark.visit_radius_m, 1.0),
+        1.0
+        - landmark.distance_m / max(landmark.visit_radius_m, 1.0),
     )
     bonus = 0.08 if landmark.category in HIGHLIGHT_CATEGORIES else 0.0
     return min(0.95, 0.55 + 0.37 * proximity + bonus)
@@ -669,10 +674,7 @@ def evaluate_osm(
             continue
         if "name" in tags:
             landmark = landmark_from_element(
-                element,
-                tags,
-                analysis,
-                landmark_radius_m,
+                element, tags, analysis, landmark_radius_m
             )
             if landmark:
                 landmarks.append(landmark)
@@ -726,16 +728,10 @@ def identify(
     timeout_seconds: float,
 ) -> Identification:
     data, endpoint = request_osm(
-        analysis,
-        urls,
-        padding_m,
-        timeout_seconds,
+        analysis, urls, padding_m, timeout_seconds
     )
     candidates, landmarks = evaluate_osm(
-        analysis,
-        data,
-        route_radius_m,
-        landmark_radius_m,
+        analysis, data, route_radius_m, landmark_radius_m
     )
     best = (
         candidates[0]
@@ -785,13 +781,31 @@ def ranked_highlights(result: Identification) -> list[Landmark]:
     )
 
 
+def relevant_waypoints(result: Identification) -> list[Landmark]:
+    """Return unique visited landmarks that belong in the copied GPX."""
+
+    unique: dict[tuple[str, str], Landmark] = {}
+    for landmark in result.landmarks:
+        if (
+            not landmark.visited
+            or landmark.category not in WAYPOINT_CATEGORIES
+        ):
+            continue
+        key = (landmark.name.strip().casefold(), landmark.category)
+        previous = unique.get(key)
+        if previous is None or landmark.distance_m < previous.distance_m:
+            unique[key] = landmark
+    return sorted(
+        unique.values(),
+        key=lambda item: (item.distance_m, item.name.casefold()),
+    )
+
+
 def first_gpx_date(path: Path) -> str | None:
     try:
         with path.open("rb") as source:
             for _, element in etree.iterparse(
-                source,
-                events=("end",),
-                huge_tree=True,
+                source, events=("end",), huge_tree=True
             ):
                 if (
                     not isinstance(element.tag, str)
@@ -841,8 +855,7 @@ def highlight_description(highlights: Sequence[Landmark]) -> str:
 
 
 def set_track_description(
-    track: etree._Element,
-    description: str,
+    track: etree._Element, description: str
 ) -> None:
     existing = next(
         (
@@ -876,6 +889,73 @@ def set_track_description(
     track.insert(index, new_description)
 
 
+def qualified_gpx_tag(root: etree._Element, name: str) -> str:
+    namespace = etree.QName(root).namespace
+    return f"{{{namespace}}}{name}" if namespace else name
+
+
+def existing_waypoint_names(root: etree._Element) -> set[str]:
+    names: set[str] = set()
+    for child in root:
+        if (
+            not isinstance(child.tag, str)
+            or local_name(child.tag) != "wpt"
+        ):
+            continue
+        name = direct_child_text(child, "name")
+        if name and name.strip():
+            names.add(name.strip().casefold())
+    return names
+
+
+def add_landmark_waypoints(
+    root: etree._Element,
+    landmarks: Sequence[Landmark],
+) -> None:
+    """Append relevant landmarks as root-level GPX waypoints."""
+
+    known_names = existing_waypoint_names(root)
+    insertion_index = len(root)
+    for index, child in enumerate(root):
+        if (
+            isinstance(child.tag, str)
+            and local_name(child.tag) in {"rte", "trk", "extensions"}
+        ):
+            insertion_index = index
+            break
+
+    for landmark in landmarks:
+        normalized_name = landmark.name.strip().casefold()
+        if normalized_name in known_names:
+            continue
+
+        waypoint = etree.Element(
+            qualified_gpx_tag(root, "wpt"),
+            lat=f"{landmark.latitude:.8f}",
+            lon=f"{landmark.longitude:.8f}",
+        )
+        name = etree.SubElement(
+            waypoint, qualified_gpx_tag(root, "name")
+        )
+        name.text = landmark.name
+        description = etree.SubElement(
+            waypoint,
+            qualified_gpx_tag(root, "desc"),
+        )
+        description.text = (
+            f"Visited {landmark.category} near the recorded track; "
+            f"nearest track point {landmark.distance_m:.0f} m away."
+        )
+        waypoint_type = etree.SubElement(
+            waypoint,
+            qualified_gpx_tag(root, "type"),
+        )
+        waypoint_type.text = landmark.category
+        root.insert(insertion_index, waypoint)
+        insertion_index += 1
+        known_names.add(normalized_name)
+
+
 def write_highlight_copy(
     result: Identification,
     source_path: Path,
@@ -904,8 +984,10 @@ def write_highlight_copy(
             f"found {len(tracks)}"
         )
     set_track_description(
-        tracks[0],
-        highlight_description(highlights),
+        tracks[0], highlight_description(highlights)
+    )
+    add_landmark_waypoints(
+        tree.getroot(), relevant_waypoints(result)
     )
     tree.write(
         str(output_path),
@@ -947,7 +1029,9 @@ def write_highlight_copies(
 # Reports ---------------------------------------------------------------------
 
 
-def rounded(value: float | None, digits: int = 2) -> float | None:
+def rounded(
+    value: float | None, digits: int = 2
+) -> float | None:
     return round(value, digits) if value is not None else None
 
 
@@ -1058,9 +1142,7 @@ def write_reports(
         "warnings",
     ]
     with paths["csv"].open(
-        "w",
-        newline="",
-        encoding="utf-8-sig",
+        "w", newline="", encoding="utf-8-sig"
     ) as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=columns)
         writer.writeheader()
@@ -1190,8 +1272,7 @@ def write_reports(
         encoding="utf-8",
     )
     payload = json.dumps(
-        map_tracks,
-        ensure_ascii=False,
+        map_tracks, ensure_ascii=False
     ).replace("</", "<\\/")
     paths["html"].write_text(
         f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GPX trail identification</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{{height:100%;margin:0}}#panel{{position:absolute;z-index:1000;top:12px;right:12px;max-width:420px;background:#fffffff0;padding:12px;font:13px system-ui}}</style></head><body><div id="map"></div><div id="panel"><b>GPX trail identification</b><div id="items"></div></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const tracks={payload},map=L.map('map'),bounds=[],layers={{}},items=document.getElementById('items');L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',{{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}}).addTo(map);for(const t of tracks){{const g=L.layerGroup().addTo(map),line=L.polyline(t.coordinates,{{color:t.color,weight:5}}).addTo(g);bounds.push(...t.coordinates);for(const m of t.landmarks)L.circleMarker([m.latitude,m.longitude],{{radius:5,color:m.visited?'#167c3b':'#9a5500'}}).addTo(g).bindPopup(`<b>${{m.name}}</b><br>${{m.category}}<br>${{m.distance_m}} m`);layers[`${{t.file}} — ${{t.trail}}`]=g;items.insertAdjacentHTML('beforeend',`<p><b style="color:${{t.color}}">${{t.file}}</b><br>${{t.trail}} · ${{t.confidence}} · ${{t.distance_km}} km</p>`)}}L.control.layers(null,layers,{{collapsed:false}}).addTo(map);if(bounds.length)map.fitBounds(bounds,{{padding:[25,25]}});</script></body></html>''',
@@ -1227,24 +1308,16 @@ def argument_parser() -> argparse.ArgumentParser:
         dest="overpass_urls",
     )
     parser.add_argument(
-        "--route-match-radius-m",
-        type=float,
-        default=70.0,
+        "--route-match-radius-m", type=float, default=70.0
     )
     parser.add_argument(
-        "--landmark-visit-radius-m",
-        type=float,
-        default=180.0,
+        "--landmark-visit-radius-m", type=float, default=180.0
     )
     parser.add_argument(
-        "--query-padding-m",
-        type=float,
-        default=1500.0,
+        "--query-padding-m", type=float, default=1500.0
     )
     parser.add_argument(
-        "--timeout-seconds",
-        type=float,
-        default=120.0,
+        "--timeout-seconds", type=float, default=120.0
     )
     return parser
 
@@ -1287,8 +1360,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
 
     files = discover_gpx_files(
-        arguments.inputs,
-        arguments.recursive,
+        arguments.inputs, arguments.recursive
     )
     if not files:
         parser.error("No GPX files found")
@@ -1309,13 +1381,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             for analysis in analyses
         ]
         report_paths = write_reports(
-            results,
-            arguments.output_dir,
+            results, arguments.output_dir
         )
         highlight_paths = write_highlight_copies(
-            results,
-            files,
-            arguments.output_dir,
+            results, files, arguments.output_dir
         )
     except (
         OSError,
