@@ -12,7 +12,7 @@ This repository contains two Python command-line tools for working with GPX trac
 
 ### GPX Trail Identifier
 
-`identify_trails.py` analyzes a single track per GPX file, uses live OpenStreetMap data from Overpass to rank nearby hiking routes and named landmarks, and writes CSV, JSON, GeoJSON, and interactive HTML reports. Tracks with multiple visited highlights also receive a renamed GPX copy with a generated description.
+`identify_trails.py` analyzes a single track per GPX file, uses live OpenStreetMap data from Overpass to rank nearby hiking routes and named landmarks, and writes CSV, JSON, GeoJSON, and interactive HTML reports. Tracks with multiple visited highlights also receive a renamed GPX copy with a generated description and visited highlight and parking waypoints.
 
 [Read the trail identifier documentation](TRAIL_IDENTIFIER.md)
 
