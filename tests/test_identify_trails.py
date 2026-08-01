@@ -28,6 +28,7 @@ class TrailIdentifierTests(unittest.TestCase):
         gpx = """<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">
   <metadata><time>2025-05-06T09:00:00Z</time></metadata>
+  <wpt lat="39.9" lon="-3.1"><name>Existing Waypoint</name></wpt>
   <trk>
     <name>Walk</name>
     <desc>Original description.</desc>
@@ -109,6 +110,33 @@ class TrailIdentifierTests(unittest.TestCase):
                 "Main highlight: Main Cave. "
                 "Other visited highlights: River View.",
                 description,
+            )
+
+            waypoint_names = tree.xpath(
+                '/*[local-name()="gpx"]/*[local-name()="wpt"]/'
+                '*[local-name()="name"]/text()'
+            )
+            self.assertEqual(
+                [
+                    "Existing Waypoint",
+                    "Parking Area",
+                    "Main Cave",
+                    "River View",
+                ],
+                waypoint_names,
+            )
+
+            waypoint_types = tree.xpath(
+                '/*[local-name()="gpx"]/*[local-name()="wpt"]/'
+                '*[local-name()="type"]/text()'
+            )
+            self.assertEqual(
+                [
+                    "amenity=parking",
+                    "natural=cave_entrance",
+                    "tourism=viewpoint",
+                ],
+                waypoint_types,
             )
 
 
