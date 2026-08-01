@@ -6,12 +6,13 @@ A streaming Python utility that extracts and splits GPX tracks while preserving 
 
 For each pair of consecutive track points, a new subtrack starts when:
 
-1. both points have valid timestamps and their UTC calendar dates differ;
-2. both points have valid timestamps and the timestamp gap is greater than the configured threshold (six hours by default);
-3. time information is missing or invalid on either point and the great-circle distance between the points exceeds the configured threshold (100 km by default); or
-4. both timestamps are valid but time moves backwards.
+1. both points have valid timestamps, time moves forwards or remains equal, and their UTC calendar dates differ;
+2. both points have valid timestamps, time moves forwards, and the timestamp gap is greater than the configured threshold (one hour by default); or
+3. time information is missing or invalid on either point and the great-circle distance between the points exceeds the configured threshold (10 km by default).
 
-The 100 km default is deliberately conservative. It is large enough to avoid splitting most legitimate sparse tracks, while still detecting the kind of discontinuity normally caused by unrelated recording sessions or corrupted untimed data. Both thresholds are configurable.
+If time moves backwards between two consecutive points, that pair is left in the same subtrack. It does not trigger a split, even if the two timestamps have different UTC dates.
+
+The one-hour and 10 km defaults are intended for hiking tracks. They detect long recording pauses and obvious untimed discontinuities while avoiding splits for normal short rests or GPS drift. Both thresholds are configurable.
 
 ## Preserved information
 
@@ -50,8 +51,8 @@ Custom thresholds and output directory:
 ```bash
 python gpx_splitter.py massive_file.gpx \
   --output-dir split_tracks \
-  --time-gap-hours 4 \
-  --distance-gap-km 75
+  --time-gap-hours 2 \
+  --distance-gap-km 20
 ```
 
 Replace files from a previous run:
