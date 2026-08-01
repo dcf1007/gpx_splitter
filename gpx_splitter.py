@@ -21,7 +21,8 @@ from typing import BinaryIO
 from lxml import etree
 
 
-GPX_ROOT_CHILDREN_TO_EXCLUDE = {"wpt", "rte", "trk"}
+GPX_ROOT_CHILDREN_TO_INCLUDE = {"trk"}
+GPX_ROOT_NON_TRACK_GEOMETRY_TO_IGNORE = {"wpt", "rte"}
 WINDOWS_RESERVED_FILENAMES = {
     "CON",
     "PRN",
@@ -141,7 +142,7 @@ def sanitize_filename_component(value: str) -> str:
 
 
 def read_root_context(input_path: Path) -> RootContext:
-    """Read root metadata with bounded memory, excluding waypoints/routes/tracks."""
+    """Read root metadata while deferring included tracks to the split pass."""
 
     root_element: etree._Element | None = None
     root_tag = ""
@@ -166,14 +167,22 @@ def read_root_context(input_path: Path) -> RootContext:
                 root_namespace_map = dict(element.nsmap)
             elif element.getparent() is root_element:
                 current_top_level_name = local_name(element)
-                if current_top_level_name == "trk":
+                if current_top_level_name in GPX_ROOT_CHILDREN_TO_INCLUDE:
                     has_seen_track = True
             continue
 
         parent = element.getparent()
         if parent is root_element:
             element_name = local_name(element)
-            if element_name not in GPX_ROOT_CHILDREN_TO_EXCLUDE:
+            is_included_track = element_name in GPX_ROOT_CHILDREN_TO_INCLUDE
+            is_ignored_non_track_geometry = (
+                element_name in GPX_ROOT_NON_TRACK_GEOMETRY_TO_IGNORE
+            )
+
+            # Track elements are processed in the second streaming pass. Waypoints
+            # and routes are intentionally ignored. Any other root child is metadata
+            # or extension information and is copied into every generated GPX.
+            if not is_included_track and not is_ignored_non_track_geometry:
                 serialized_element = etree.tostring(
                     element,
                     encoding="utf-8",
@@ -188,7 +197,10 @@ def read_root_context(input_path: Path) -> RootContext:
             while element.getprevious() is not None:
                 del parent[0]
             current_top_level_name = None
-        elif current_top_level_name in GPX_ROOT_CHILDREN_TO_EXCLUDE:
+        elif (
+            current_top_level_name in GPX_ROOT_CHILDREN_TO_INCLUDE
+            or current_top_level_name in GPX_ROOT_NON_TRACK_GEOMETRY_TO_IGNORE
+        ):
             # The first pass does not need waypoint, route, or track internals.
             # Clear them as they close so one enormous track cannot fill memory.
             element.clear(keep_tail=True)
@@ -395,7 +407,10 @@ def split_gpx_tracks(
                         continue
 
                     parent = element.getparent()
-                    if parent is root_element and local_name(element) == "trk":
+                    if (
+                        parent is root_element
+                        and local_name(element) in GPX_ROOT_CHILDREN_TO_INCLUDE
+                    ):
                         track_count += 1
                         current_track_element = element
                         track_tag = element.tag
