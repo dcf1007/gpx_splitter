@@ -8,7 +8,7 @@ The script is intentionally self-contained. All Python code is in `identify_trai
 
 For each GPX file, the script performs the following steps:
 
-1. Streams the GPX XML and extracts the track name, coordinates, elevations, and timestamps.
+1. Streams the GPX XML, verifies that it contains exactly one `<trk>` element, and extracts the track name, coordinates, elevations, and timestamps.
 2. Calculates distance, duration, elevation range, elevation gain and loss, start/end separation, track closure, and timestamp-order diagnostics.
 3. Builds a padded bounding box around the GPX geometry.
 4. Sends a live query to OpenStreetMap through an Overpass API endpoint.
@@ -16,6 +16,7 @@ For each GPX file, the script performs the following steps:
 6. Measures how much of the GPX lies close to each route and how close the GPX passes to each landmark.
 7. Ranks the resulting route and landmark candidates.
 8. Writes summary and detailed reports.
+9. When at least two visited highlights are detected, writes an enriched copy of the original GPX into the output directory.
 
 There is no local trail catalog, response cache, mocked runtime data, or offline fallback. If all configured Overpass endpoints fail, the command exits with an error and does not silently create partial identification results.
 
@@ -72,7 +73,8 @@ The script creates:
 - `trail_identification.csv` — one summary row per GPX file;
 - `trail_identification.json` — complete statistics, candidates, landmarks, tags, warnings, and API metadata;
 - `trail_identification.geojson` — GPX lines and nearby landmark points;
-- `trail_identification.html` — an interactive Leaflet map using OpenStreetMap background tiles.
+- `trail_identification.html` — an interactive Leaflet map using OpenStreetMap background tiles;
+- an enriched GPX copy for any track with at least two visited highlights.
 
 The HTML report requires an internet connection when opened because it loads Leaflet and map tiles from public services.
 
@@ -107,6 +109,45 @@ A landmark becomes a candidate when the GPX passes within its visit radius. The 
 
 A landmark candidate identifies a named place the track appears to visit. It does not necessarily represent the formal name of the complete trail.
 
+## GPX input restrictions
+
+Each input file must contain exactly one root-level GPX `<trk>` element. Multiple track segments inside that track are allowed, but multiple `<trk>` elements are not.
+
+All input GPX files are structurally validated before any live Overpass request is made. When any input file contains more than one track, the complete command stops and reports an error such as:
+
+```text
+Multiple GPX tracks found in example.gpx; trail identification requires exactly one <trk> element
+```
+
+## Highlight-enriched GPX copies
+
+After identification, the script collects visited named highlights. Highlights include named natural and tourism features such as caves, springs, waterfalls, water features, peaks, saddles, rocks, cliffs, viewpoints, attractions, information points, picnic sites, huts, and nature reserves. Parking areas and settlements are not treated as highlights for this purpose.
+
+When at least two unique highlights were visited, the script writes a copy of the original GPX into the results directory. The original GPX is not modified.
+
+The copy's track-level `<desc>` field is created or extended with a short description such as:
+
+```text
+Main highlight: Cueva Serena. Other visited highlights: Mirador del Bosque; Cascada Alta.
+```
+
+The highest-ranked visited highlight is used as the main highlight. The output filename is:
+
+```text
+YYYY-MM-DD_Main-highlight.gpx
+```
+
+The date is taken from the first valid metadata or track-point timestamp in GPX document order. When no valid timestamp exists, the date prefix is omitted. Spaces in the main highlight are replaced with dashes, and characters that are unsafe in filenames are also replaced.
+
+Examples:
+
+```text
+2025-05-06_Main-Cave.gpx
+Cueva-Serena.gpx
+```
+
+If two input files would produce the same filename in one run, the later file receives a numeric suffix such as `_2`.
+
 ## Command-line options
 
 ```text
@@ -134,6 +175,8 @@ For each GPX file, the command prints:
 - the number of candidates and landmarks found;
 - the OSM base timestamp;
 - warnings for malformed, missing, reverse, or mixed timestamps and for open tracks.
+
+Generated highlight GPX copies are listed in the `Outputs` section as `highlight_gpx` entries.
 
 An `unmatched` result after a successful live query means no candidate reached the minimum score. It is different from an API failure, which terminates the command with an error.
 
