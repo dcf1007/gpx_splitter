@@ -46,14 +46,16 @@ python gpx_splitter.py massive_file.gpx
 
 By default, files are written to `massive_file_split_tracks/` beside the input file.
 
-Custom thresholds and output directory:
+Explicit hiking defaults and output directory:
 
 ```bash
 python gpx_splitter.py massive_file.gpx \
   --output-dir split_tracks \
-  --time-gap-hours 2 \
-  --distance-gap-km 20
+  --time-gap-hours 1 \
+  --distance-gap-km 10
 ```
+
+The two threshold options can be changed when a different split policy is required.
 
 Replace files from a previous run:
 
