@@ -277,3 +277,5 @@ jobs:
           git add identify_trails.py TRAIL_IDENTIFIER.md README.md tests/test_identify_trails.py
           git commit -m "Add relevant waypoints to enriched GPX copies"
           git push
+
+# Trigger the workflow after it exists on the default branch.
