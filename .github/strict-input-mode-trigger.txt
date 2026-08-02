@@ -1,1 +1,1 @@
-Apply the strict input-mode update after exact generator fix.
+Apply the strict input-mode update with literal replacement handling.
