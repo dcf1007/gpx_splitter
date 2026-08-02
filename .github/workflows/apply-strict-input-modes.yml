@@ -1,38 +1,38 @@
 name: Apply strict GPX input modes
 
 on:
-  issues:
-    types: [opened]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
-  issues: write
+  pull-requests: write
 
 jobs:
   update:
-    if: github.event.issue.title == 'Apply strict input modes'
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
 
-      - name: Apply update
+      - name: Apply strict input update
         run: python .github/apply_strict_inputs.py
 
       - name: Validate
-        run: python -m unittest discover -s tests -v
+        run: |
+          python -m py_compile gpx_splitter.py identify_trails.py merge_gpx.py
+          python -m unittest discover -s tests -v
 
-      - name: Commit update
-        shell: bash
+      - name: Commit generated changes
         run: |
           rm .github/workflows/apply-strict-input-modes.yml
           rm .github/apply_strict_inputs.py
-          git config user.name "OpenAI"
-          git config user.email "openai@users.noreply.github.com"
+          rm -f .github/strict-input-mode-trigger.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Support directory or file-list inputs"
-          git push
-
-      - name: Close trigger issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue close "${{ github.event.issue.number }}" --comment "Input-mode update applied and validated."
+          git commit -m "Enforce strict GPX input modes"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
