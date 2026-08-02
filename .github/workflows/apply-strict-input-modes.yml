@@ -19,7 +19,18 @@ jobs:
           fetch-depth: 0
 
       - name: Apply strict input update
-        run: python .github/apply_strict_inputs.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/apply_strict_inputs.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              r'message=f"Error: {error}\n")',
+              r'message=f"Error: {error}\\n")',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+          python .github/apply_strict_inputs.py
 
       - name: Validate
         run: |
