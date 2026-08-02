@@ -1,1 +1,1 @@
-Apply the prepared strict input-mode update after generator fix.
+Apply the strict input-mode update after exact generator fix.
