@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import copy
 import math
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -110,6 +111,17 @@ def point_timestamp(point: etree._Element) -> datetime:
     if timestamp is None:
         raise ValueError("track point has no valid <time>")
     return timestamp
+
+
+def track_has_valid_timestamp(track: etree._Element) -> bool:
+    """Return whether any track point contains a valid GPX timestamp."""
+
+    for point in iter_track_points(track):
+        time_element = direct_child(point, "time")
+        value = time_element.text if time_element is not None else None
+        if parse_timestamp(value) is not None:
+            return True
+    return False
 
 
 def point_coordinate(point: etree._Element) -> tuple[float, float]:
@@ -274,10 +286,24 @@ def read_all_tracks(paths: Sequence[Path]) -> tuple[list[SourceDocument], list[T
             if isinstance(child.tag, str) and local_name(child) == "trk"
         ]
         for index, track in enumerate(source_tracks, start=1):
+            if not track_has_valid_timestamp(track):
+                name_element = direct_child(track, "name")
+                track_name = (
+                    "".join(name_element.itertext()).strip()
+                    if name_element is not None
+                    else ""
+                )
+                label = track_name or f"track {index}"
+                print(
+                    f"Warning: skipped {path.name} / {label} (track {index}): "
+                    "no valid date/time information.",
+                    file=sys.stderr,
+                )
+                continue
             tracks.append(validate_track(path, track, index))
 
     if not tracks:
-        raise ValueError("No root-level GPX <trk> elements were found")
+        raise ValueError("No tracks with valid date/time information were found")
     return documents, tracks
 
 

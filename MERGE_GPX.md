@@ -2,7 +2,7 @@
 
 `merge_gpx.py` reads every root-level GPX track from all supplied GPX files, validates their chronology, sorts them globally, and merges adjacent tracks when both their time gap and endpoint distance are within configured limits.
 
-The script writes one GPX file. Tracks that match are combined into one `<trk>`. Every original `<trkseg>` remains a separate `<trkseg>` in its original order.
+Tracks with no valid date/time information are skipped with a warning. The script writes one GPX file. Tracks that match are combined into one `<trk>`. Every original `<trkseg>` remains a separate `<trkseg>` in its original order.
 
 ## Basic usage
 
@@ -38,14 +38,15 @@ The script performs these operations in order:
 
 1. Discovers all requested GPX files.
 2. Parses all root-level `<trk>` elements from every input file.
-3. Requires every track to contain at least one `<trkseg>` and at least one `<trkpt>`.
-4. Requires every track point to have valid latitude, longitude, and timestamp data.
-5. Requires timestamps inside each track to be nondecreasing in document order.
-6. Calculates each track's first timestamp, last timestamp, first coordinate, and last coordinate.
-7. Sorts all tracks by start timestamp, then end timestamp, then source filename and source track position.
-8. Rejects any time overlap between sorted tracks.
-9. Groups adjacent tracks when both the time-gap and distance-gap rules match.
-10. Writes the sorted groups to one GPX document.
+3. Skips a track, with a warning, when none of its points has a valid timestamp.
+4. Requires every retained track to contain at least one `<trkseg>` and at least one `<trkpt>`.
+5. Requires every point in a retained track to have valid latitude, longitude, and timestamp data.
+6. Requires timestamps inside each retained track to be nondecreasing in document order.
+7. Calculates each retained track's first timestamp, last timestamp, first coordinate, and last coordinate.
+8. Sorts retained tracks by start timestamp, then end timestamp, then source filename and source track position.
+9. Rejects any time overlap between sorted tracks.
+10. Groups adjacent tracks when both the time-gap and distance-gap rules match.
+11. Writes the sorted groups to one GPX document.
 
 All input files must use the same GPX root namespace and GPX version. Mixing incompatible GPX versions or namespaces aborts the operation.
 
@@ -158,12 +159,12 @@ An interval that starts exactly when the previous interval ends is allowed.
 
 ## Strict timestamp validation
 
-Because global sorting and overlap detection depend on reliable time ranges, every `<trkpt>` must contain a valid `<time>` value.
+A track with no valid timestamps anywhere is skipped and reported on standard error. If every input track is skipped, the script exits with an error because there is nothing to merge.
 
-The script aborts when:
+Once a track contains at least one valid timestamp, global sorting and overlap detection require complete chronology. The script aborts when that retained track contains:
 
-- a track point has no timestamp;
-- a timestamp is malformed;
+- a track point with no timestamp;
+- a malformed timestamp;
 - timestamps move backward inside one track;
 - a track has no segments;
 - a track has no points;
