@@ -1,6 +1,6 @@
 # GPX Tools
 
-This repository contains two Python command-line tools for working with GPX tracks.
+This repository contains three Python command-line tools for working with GPX tracks.
 
 ## Scripts
 
@@ -9,6 +9,12 @@ This repository contains two Python command-line tools for working with GPX trac
 `gpx_splitter.py` extracts GPX tracks and splits them when there is a date change, a long forward time gap, or a large untimed geographic gap. It preserves track, segment, point, namespace, metadata, and extension information.
 
 [Read the GPX splitter documentation](GPX_SPLITTER.md)
+
+### GPX Track Merger
+
+`merge_gpx.py` reads every track from all supplied GPX files, sorts them chronologically, rejects overlapping time ranges, and merges adjacent tracks when both their time and spatial gaps match. Original tracks remain separate GPX segments inside each merged track.
+
+[Read the GPX merger documentation](MERGE_GPX.md)
 
 ### GPX Trail Identifier
 
