@@ -1,54 +1,55 @@
 from pathlib import Path
 import re
+from textwrap import dedent
 
-STRICT_DISCOVERY = '''def discover_gpx_files(
-    inputs: Sequence[Path],
-    recursive: bool = False,
-) -> list[Path]:
-    """Accept exactly one directory or one or more GPX files."""
+
+STRICT_DISCOVERY = dedent('''
+def discover_gpx_files(inputs: Sequence[Path]) -> list[Path]:
+    """Accept exactly one directory or one or more explicit GPX files."""
 
     if not inputs:
-        raise ValueError("Provide one GPX directory or one or more GPX files")
+        raise ValueError("Provide one directory or one or more GPX files")
 
     paths = [path.expanduser() for path in inputs]
     missing = [path for path in paths if not path.exists()]
     if missing:
-        raise FileNotFoundError(f"Input path does not exist: {missing[0]}")
+        names = ", ".join(str(path) for path in missing)
+        raise ValueError(f"Input path does not exist: {names}")
 
     directories = [path for path in paths if path.is_dir()]
     if directories:
         if len(paths) != 1:
             raise ValueError(
-                "Provide either one directory or one or more GPX files; "
+                "Input must be either one directory or one or more GPX files; "
                 "do not mix files and directories or provide multiple directories"
             )
         directory = directories[0]
-        pattern = "**/*.gpx" if recursive else "*.gpx"
         files = sorted(
-            file_path.resolve()
-            for file_path in directory.glob(pattern)
-            if file_path.is_file()
+            item.resolve()
+            for item in directory.iterdir()
+            if item.is_file() and item.suffix.lower() == ".gpx"
         )
         if not files:
             raise ValueError(f"No GPX files found in directory: {directory}")
         return files
 
-    files: set[Path] = set()
-    for path in paths:
-        if not path.is_file():
-            raise ValueError(f"Input is not a regular file: {path}")
-        if path.suffix.lower() != ".gpx":
-            raise ValueError(f"Input file is not a GPX file: {path}")
-        files.add(path.resolve())
-    return sorted(files)
-'''
+    invalid_files = [
+        path
+        for path in paths
+        if not path.is_file() or path.suffix.lower() != ".gpx"
+    ]
+    if invalid_files:
+        names = ", ".join(str(path) for path in invalid_files)
+        raise ValueError(f"Explicit inputs must be GPX files: {names}")
+
+    return sorted({path.resolve() for path in paths})
+''').lstrip()
 
 
 def replace_discovery(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     pattern = re.compile(
-        r"def discover_gpx_files\([\s\S]*?\n    return sorted\(files\)\n",
-        re.MULTILINE,
+        r"def discover_gpx_files\([\s\S]*?\n    return sorted\(files\)\n"
     )
     updated, count = pattern.subn(STRICT_DISCOVERY.rstrip() + "\n", text, count=1)
     if count != 1:
@@ -56,8 +57,45 @@ def replace_discovery(path: Path) -> None:
     path.write_text(updated, encoding="utf-8")
 
 
-replace_discovery(Path("identify_trails.py"))
-replace_discovery(Path("merge_gpx.py"))
+# Trail identifier ------------------------------------------------------------
+
+identify_path = Path("identify_trails.py")
+replace_discovery(identify_path)
+identify = identify_path.read_text(encoding="utf-8")
+identify = identify.replace(
+    '    parser.add_argument("--recursive", action="store_true")\n',
+    "",
+)
+identify = identify.replace(
+    "    files = discover_gpx_files(arguments.inputs, arguments.recursive)\n",
+    "    files = discover_gpx_files(arguments.inputs)\n",
+)
+if "arguments.recursive" in identify or '"--recursive"' in identify:
+    raise RuntimeError("Recursive trail-identifier input handling remains")
+identify_path.write_text(identify, encoding="utf-8")
+
+
+# GPX merger ------------------------------------------------------------------
+
+merge_path = Path("merge_gpx.py")
+replace_discovery(merge_path)
+merge = merge_path.read_text(encoding="utf-8")
+merge = merge.replace("    recursive: bool = False,\n", "")
+merge = merge.replace(
+    "    files = discover_gpx_files(input_paths, recursive)\n",
+    "    files = discover_gpx_files(input_paths)\n",
+)
+merge = merge.replace(
+    '    parser.add_argument("--recursive", action="store_true")\n',
+    "",
+)
+merge = merge.replace("            recursive=arguments.recursive,\n", "")
+if "arguments.recursive" in merge or '"--recursive"' in merge:
+    raise RuntimeError("Recursive merger input handling remains")
+merge_path.write_text(merge, encoding="utf-8")
+
+
+# GPX splitter ----------------------------------------------------------------
 
 splitter_path = Path("gpx_splitter.py")
 splitter = splitter_path.read_text(encoding="utf-8")
@@ -69,14 +107,14 @@ splitter = splitter.replace(
 if "from typing import BinaryIO, Sequence" not in splitter:
     raise RuntimeError("Could not update splitter typing import")
 
-splitter_helpers = STRICT_DISCOVERY + '''
+splitter_helpers = STRICT_DISCOVERY + dedent('''
 
 
 def plan_output_directories(
     input_files: Sequence[Path],
     output_root: Path | None,
 ) -> dict[Path, Path]:
-    """Choose one output directory per source GPX file."""
+    """Choose one isolated output directory per source GPX file."""
 
     if output_root is None:
         return {
@@ -91,8 +129,7 @@ def plan_output_directories(
     planned: dict[Path, Path] = {}
     used_names: set[str] = set()
     for input_path in input_files:
-        stem = sanitize_filename_component(input_path.stem)
-        base_name = f"{stem}_split_tracks"
+        base_name = f"{sanitize_filename_component(input_path.stem)}_split_tracks"
         directory_name = base_name
         suffix = 2
         while directory_name.casefold() in used_names:
@@ -106,14 +143,13 @@ def plan_output_directories(
 def split_gpx_inputs(
     inputs: Sequence[Path],
     output_root: Path | None = None,
-    recursive: bool = False,
     time_gap_hours: float = 1.0,
     distance_gap_km: float = 10.0,
     overwrite: bool = False,
 ) -> dict[Path, list[Path]]:
-    """Discover and split all GPX files from one valid input mode."""
+    """Split all files selected by the strict file-or-directory input mode."""
 
-    input_files = discover_gpx_files(inputs, recursive)
+    input_files = discover_gpx_files(inputs)
     output_directories = plan_output_directories(input_files, output_root)
     return {
         input_path: split_gpx_tracks(
@@ -125,13 +161,17 @@ def split_gpx_inputs(
         )
         for input_path in input_files
     }
-'''
+''')
 
-main_pattern = re.compile(
-    r"def main\(\) -> int:\n[\s\S]*?(?=\n\nif __name__ == \"__main__\":)",
-    re.MULTILINE,
-)
-new_main = '''def main() -> int:
+if "def discover_gpx_files(" in splitter:
+    raise RuntimeError("Splitter already contains discovery helpers")
+anchor = "\ndef read_root_context(input_path: Path) -> RootContext:\n"
+if anchor not in splitter:
+    raise RuntimeError("Could not find splitter helper insertion point")
+splitter = splitter.replace(anchor, "\n" + splitter_helpers + anchor, 1)
+
+new_main = dedent('''
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Split GPX tracks when the UTC date changes, timestamps are far apart, "
@@ -142,20 +182,14 @@ new_main = '''def main() -> int:
         "inputs",
         nargs="+",
         type=Path,
-        help="Exactly one directory, or one or more GPX files.",
-    )
-    parser.add_argument(
-        "--recursive",
-        action="store_true",
-        help="Search the single input directory recursively.",
+        help="One directory or one or more GPX files.",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         help=(
-            "Output directory. With several source files, creates one "
-            "source-specific subdirectory per GPX file. Without this option, "
-            "each source uses <input_name>_split_tracks beside the input file."
+            "Output directory. One source writes directly there; multiple sources "
+            "use separate <name>_split_tracks subdirectories."
         ),
     )
     parser.add_argument(
@@ -178,13 +212,12 @@ new_main = '''def main() -> int:
         action="store_true",
         help="Replace generated GPX files that already exist.",
     )
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
 
     try:
         outputs_by_input = split_gpx_inputs(
             inputs=arguments.inputs,
             output_root=arguments.output_dir,
-            recursive=arguments.recursive,
             time_gap_hours=arguments.time_gap_hours,
             distance_gap_km=arguments.distance_gap_km,
             overwrite=arguments.overwrite,
@@ -192,39 +225,114 @@ new_main = '''def main() -> int:
     except (OSError, ValueError, etree.XMLSyntaxError) as error:
         parser.exit(status=1, message=f"Error: {error}\n")
 
-    total_outputs = 0
-    for input_path, written_files in outputs_by_input.items():
-        total_outputs += len(written_files)
-        output_directory = (
-            written_files[0].parent
-            if written_files
-            else plan_output_directories(
-                list(outputs_by_input), arguments.output_dir
-            )[input_path]
-        )
-        print(
-            f"{input_path}: created {len(written_files)} GPX file(s) "
-            f"in {output_directory.resolve()}"
-        )
+    total_outputs = sum(len(paths) for paths in outputs_by_input.values())
     print(
-        f"Processed {len(outputs_by_input)} input GPX file(s); "
-        f"created {total_outputs} output file(s)."
+        f"Processed {len(outputs_by_input)} GPX input file(s); "
+        f"created {total_outputs} GPX file(s)."
     )
+    destinations = plan_output_directories(
+        list(outputs_by_input),
+        arguments.output_dir,
+    )
+    for input_path, written_files in outputs_by_input.items():
+        print(
+            f"  {input_path}: {len(written_files)} file(s) in "
+            f"{destinations[input_path].resolve()}"
+        )
     return 0
-'''
-if "def discover_gpx_files(" in splitter:
-    raise RuntimeError("Splitter already contains discovery helpers")
-splitter = splitter.replace(
-    "def main() -> int:\n",
-    splitter_helpers + "\n\n\ndef main() -> int:\n",
-    1,
+''').lstrip().rstrip()
+
+updated, count = re.subn(
+    r"def main\(\) -> int:[\s\S]*?(?=\n\nif __name__ == \"__main__\":)",
+    new_main,
+    splitter,
+    count=1,
 )
-splitter, count = main_pattern.subn(new_main.rstrip(), splitter, count=1)
 if count != 1:
     raise RuntimeError("Could not replace splitter main function")
-splitter_path.write_text(splitter, encoding="utf-8")
+splitter_path.write_text(updated, encoding="utf-8")
 
-test_content = r'''from __future__ import annotations
+
+# Documentation ---------------------------------------------------------------
+
+readme_path = Path("README.md")
+readme = readme_path.read_text(encoding="utf-8")
+note = (
+    "All three scripts accept exactly one directory or one or more explicit GPX "
+    "files. Files and directories cannot be mixed, multiple directories are "
+    "rejected, and directory input is non-recursive.\n\n"
+)
+if note not in readme:
+    readme = readme.replace("## Scripts\n", note + "## Scripts\n", 1)
+readme_path.write_text(readme, encoding="utf-8")
+
+splitter_doc = Path("GPX_SPLITTER.md")
+text = splitter_doc.read_text(encoding="utf-8")
+usage_start = text.index("## Usage\n")
+tests_start = text.index("## Tests\n")
+usage = '''## Usage
+
+The input must be either one directory containing GPX files or one or more explicit GPX files. Do not mix files and directories or provide multiple directories. Directory input is non-recursive.
+
+```bash
+python gpx_splitter.py recording.gpx
+python gpx_splitter.py first.gpx second.gpx third.gpx
+python gpx_splitter.py recordings_directory
+```
+
+Without `--output-dir`, each source uses a sibling `<input_name>_split_tracks/` directory. With one source and `--output-dir`, outputs are written directly there. With several sources, the selected directory contains one source-specific `<input_name>_split_tracks/` subdirectory per GPX file.
+
+```bash
+python gpx_splitter.py recordings_directory \
+  --output-dir split_results \
+  --time-gap-hours 1 \
+  --distance-gap-km 10
+```
+
+Replace files from a previous run:
+
+```bash
+python gpx_splitter.py recordings_directory --overwrite
+```
+
+Output names use:
+
+```text
+YYYY-MM-DD_original_track_name_subtrack_number.gpx
+original_track_name_subtrack_number.gpx
+```
+
+The date is the first valid UTC timestamp in that subtrack. The date prefix is omitted when the subtrack has no valid timestamp. Numbering is continuous for tracks that resolve to the same sanitized filename.
+
+'''
+splitter_doc.write_text(text[:usage_start] + usage + text[tests_start:], encoding="utf-8")
+
+trail_doc = Path("TRAIL_IDENTIFIER.md")
+text = trail_doc.read_text(encoding="utf-8")
+text = text.replace(
+    "Analyze all GPX files in a directory:\n\n```bash\npython identify_trails.py path/to/gpx_directory\n```\n\nInclude subdirectories:\n\n```bash\npython identify_trails.py path/to/gpx_directory --recursive\n```\n",
+    "Analyze all GPX files in one directory:\n\n```bash\npython identify_trails.py path/to/gpx_directory\n```\n\nThe input must be either one directory or one or more explicit GPX files. Mixed inputs, multiple directories, and recursive traversal are rejected.\n",
+)
+text = text.replace("--recursive\n", "")
+if "--recursive" in text:
+    raise RuntimeError("Recursive trail-identifier documentation remains")
+trail_doc.write_text(text, encoding="utf-8")
+
+merge_doc = Path("MERGE_GPX.md")
+text = merge_doc.read_text(encoding="utf-8")
+text = text.replace(
+    "Read every GPX file in a directory:\n\n```bash\npython merge_gpx.py recordings --output combined.gpx\n```\n\nInclude subdirectories:\n\n```bash\npython merge_gpx.py recordings --recursive --output combined.gpx\n```\n",
+    "Read every GPX file in one directory:\n\n```bash\npython merge_gpx.py recordings --output combined.gpx\n```\n\nThe input must be either one directory or one or more explicit GPX files. Mixed inputs, multiple directories, and recursive traversal are rejected.\n",
+)
+text = text.replace("--recursive\n", "")
+if "--recursive" in text:
+    raise RuntimeError("Recursive merger documentation remains")
+merge_doc.write_text(text, encoding="utf-8")
+
+
+# Regression tests ------------------------------------------------------------
+
+test_content = '''from __future__ import annotations
 
 import tempfile
 import unittest
@@ -241,65 +349,75 @@ GPX = """<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="t
 </gpx>"""
 
 
-class InputModeTests(unittest.TestCase):
+class StrictInputModeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
-        self.directory = Path(self.temporary_directory.name)
+        self.root = Path(self.temporary_directory.name)
+        self.directory = self.root / "inputs"
+        self.directory.mkdir()
         self.first = self.directory / "first.gpx"
-        self.second = self.directory / "second.gpx"
+        self.second = self.directory / "second.GPX"
+        self.nested_directory = self.directory / "nested"
+        self.nested_directory.mkdir()
+        self.nested = self.nested_directory / "nested.gpx"
         self.first.write_text(GPX.format(name="First"), encoding="utf-8")
         self.second.write_text(GPX.format(name="Second"), encoding="utf-8")
-        self.other_directory = self.directory / "other"
-        self.other_directory.mkdir()
-        (self.other_directory / "third.gpx").write_text(
-            GPX.format(name="Third"), encoding="utf-8"
-        )
+        self.nested.write_text(GPX.format(name="Nested"), encoding="utf-8")
+        (self.directory / "ignored.txt").write_text("ignored", encoding="utf-8")
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_all_scripts_accept_one_directory(self) -> None:
-        expected = [self.first.resolve(), self.second.resolve()]
-        for module in (gpx_splitter, identify_trails, merge_gpx):
-            with self.subTest(module=module.__name__):
-                self.assertEqual(
-                    expected,
-                    module.discover_gpx_files([self.directory], recursive=False),
-                )
-
-    def test_all_scripts_accept_file_arguments(self) -> None:
-        expected = [self.first.resolve(), self.second.resolve()]
-        for module in (gpx_splitter, identify_trails, merge_gpx):
-            with self.subTest(module=module.__name__):
-                self.assertEqual(
-                    expected,
-                    module.discover_gpx_files(
-                        [self.second, self.first], recursive=False
-                    ),
-                )
-
-    def test_all_scripts_reject_mixed_inputs_and_multiple_directories(self) -> None:
-        for module in (gpx_splitter, identify_trails, merge_gpx):
-            with self.subTest(module=module.__name__, mode="mixed"):
-                with self.assertRaisesRegex(ValueError, "either one directory"):
-                    module.discover_gpx_files(
-                        [self.first, self.other_directory], recursive=False
-                    )
-            with self.subTest(module=module.__name__, mode="directories"):
-                with self.assertRaisesRegex(ValueError, "multiple directories"):
-                    module.discover_gpx_files(
-                        [self.directory, self.other_directory], recursive=False
-                    )
-
-    def test_splitter_processes_a_directory_into_source_specific_folders(self) -> None:
-        output_root = self.directory / "outputs"
-        result = gpx_splitter.split_gpx_inputs(
-            [self.directory], output_root=output_root
+    @staticmethod
+    def discovery_functions():
+        return (
+            gpx_splitter.discover_gpx_files,
+            identify_trails.discover_gpx_files,
+            merge_gpx.discover_gpx_files,
         )
-        self.assertEqual({self.first.resolve(), self.second.resolve()}, set(result))
+
+    def test_single_directory_is_non_recursive(self) -> None:
+        expected = [self.first.resolve(), self.second.resolve()]
+        for discover in self.discovery_functions():
+            with self.subTest(module=discover.__module__):
+                self.assertEqual(expected, discover([self.directory]))
+
+    def test_one_or_more_explicit_files_are_accepted(self) -> None:
+        expected = [self.first.resolve(), self.second.resolve()]
+        for discover in self.discovery_functions():
+            with self.subTest(module=discover.__module__):
+                self.assertEqual(expected, discover([self.second, self.first]))
+                self.assertEqual([self.first.resolve()], discover([self.first]))
+
+    def test_mixed_inputs_and_multiple_directories_are_rejected(self) -> None:
+        other = self.root / "other"
+        other.mkdir()
+        for discover in self.discovery_functions():
+            with self.subTest(module=discover.__module__, mode="mixed"):
+                with self.assertRaisesRegex(ValueError, "either one directory"):
+                    discover([self.directory, self.first])
+            with self.subTest(module=discover.__module__, mode="directories"):
+                with self.assertRaisesRegex(ValueError, "multiple directories"):
+                    discover([self.directory, other])
+
+    def test_non_gpx_explicit_file_is_rejected(self) -> None:
+        text_file = self.root / "not-gpx.txt"
+        text_file.write_text("x", encoding="utf-8")
+        for discover in self.discovery_functions():
+            with self.subTest(module=discover.__module__):
+                with self.assertRaisesRegex(ValueError, "must be GPX files"):
+                    discover([text_file])
+
+    def test_splitter_processes_directory_inputs(self) -> None:
+        output_root = self.root / "outputs"
+        results = gpx_splitter.split_gpx_inputs(
+            [self.directory],
+            output_root=output_root,
+        )
+        self.assertEqual({self.first.resolve(), self.second.resolve()}, set(results))
         self.assertEqual(
             {"first_split_tracks", "second_split_tracks"},
-            {paths[0].parent.name for paths in result.values()},
+            {paths[0].parent.name for paths in results.values()},
         )
 
 
@@ -307,49 +425,3 @@ if __name__ == "__main__":
     unittest.main()
 '''
 Path("tests/test_input_modes.py").write_text(test_content, encoding="utf-8")
-
-documentation_updates = {
-    "GPX_SPLITTER.md": '''
-
-## Input modes
-
-The splitter accepts exactly one of these input forms:
-
-```bash
-python gpx_splitter.py recordings_directory
-python gpx_splitter.py first.gpx second.gpx third.gpx
-```
-
-Do not mix file and directory arguments, and do not provide more than one directory. Directory searches are non-recursive unless `--recursive` is supplied.
-
-With multiple source files and `--output-dir`, the splitter creates a separate `<source_name>_split_tracks` subdirectory for each source GPX file to prevent output-name collisions.
-''',
-    "TRAIL_IDENTIFIER.md": '''
-
-## Input modes
-
-The identifier accepts either one directory or one or more GPX file paths. File and directory arguments cannot be mixed, and multiple directory arguments are rejected. Use `--recursive` to include GPX files in subdirectories of the single directory input.
-''',
-    "MERGE_GPX.md": '''
-
-## Input modes
-
-The merger accepts either one directory or one or more GPX file paths. File and directory arguments cannot be mixed, and multiple directory arguments are rejected. Use `--recursive` to include GPX files in subdirectories of the single directory input.
-''',
-}
-for filename, addition in documentation_updates.items():
-    path = Path(filename)
-    text = path.read_text(encoding="utf-8")
-    if "## Input modes" not in text:
-        text += addition
-    path.write_text(text, encoding="utf-8")
-
-readme_path = Path("README.md")
-readme = readme_path.read_text(encoding="utf-8")
-note = (
-    "\nAll three scripts accept either one directory or one or more GPX "
-    "files. Mixed file/directory inputs and multiple directories are rejected.\n"
-)
-if note.strip() not in readme:
-    readme += note
-readme_path.write_text(readme, encoding="utf-8")
