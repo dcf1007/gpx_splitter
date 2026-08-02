@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 from lxml import etree
@@ -185,7 +187,49 @@ class MergeGpxTests(unittest.TestCase):
                 merge_gpx.merge_gpx_files([source_path], output_path)
             self.assertFalse(output_path.exists())
 
-    def test_backward_or_missing_timestamps_abort(self) -> None:
+    def test_undated_track_is_skipped_while_dated_track_is_processed(self) -> None:
+        source = f"""<gpx xmlns="{GPX_NAMESPACE}" version="1.1" creator="test">
+  <trk><name>Undated</name><trkseg>
+    <trkpt lat="0" lon="0"/>
+    <trkpt lat="0" lon="0.01"><time>not-a-time</time></trkpt>
+  </trkseg></trk>
+  <trk><name>Dated</name><trkseg>
+    <trkpt lat="1" lon="1"><time>2026-07-01T10:00:00Z</time></trkpt>
+  </trkseg></trk>
+</gpx>"""
+        with tempfile.TemporaryDirectory() as temporary_directory_name:
+            directory = Path(temporary_directory_name)
+            source_path = self.write_file(directory, "input.gpx", source)
+            output_path = directory / "merged.gpx"
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr):
+                _, groups = merge_gpx.merge_gpx_files([source_path], output_path)
+
+            self.assertEqual([1], [len(group) for group in groups])
+            tree = etree.parse(str(output_path))
+            self.assertEqual(
+                ["Dated"],
+                tree.xpath("/gpx:gpx/gpx:trk/gpx:name/text()", namespaces=NS),
+            )
+            self.assertIn("skipped input.gpx / Undated (track 1)", stderr.getvalue())
+            self.assertIn("no valid date/time information", stderr.getvalue())
+
+    def test_partially_timed_track_still_aborts(self) -> None:
+        source = f"""<gpx xmlns="{GPX_NAMESPACE}" version="1.1" creator="test">
+  <trk><name>Partial</name><trkseg>
+    <trkpt lat="0" lon="0"><time>2026-07-01T10:00:00Z</time></trkpt>
+    <trkpt lat="0" lon="0.01"/>
+  </trkseg></trk>
+</gpx>"""
+        with tempfile.TemporaryDirectory() as temporary_directory_name:
+            directory = Path(temporary_directory_name)
+            source_path = self.write_file(directory, "partial.gpx", source)
+
+            with self.assertRaisesRegex(ValueError, "no valid <time>"):
+                merge_gpx.merge_gpx_files([source_path], directory / "merged.gpx")
+
+    def test_backward_timestamps_abort_and_all_undated_tracks_are_rejected(self) -> None:
         backward = f"""<gpx xmlns="{GPX_NAMESPACE}" version="1.1" creator="test">
   <trk><name>Backward</name><trkseg>
     <trkpt lat="0" lon="0"><time>2026-07-01T11:00:00Z</time></trkpt>
@@ -202,8 +246,14 @@ class MergeGpxTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "moves backward in time"):
                 merge_gpx.merge_gpx_files([backward_path], directory / "a.gpx")
-            with self.assertRaisesRegex(ValueError, "no valid <time>"):
-                merge_gpx.merge_gpx_files([missing_path], directory / "b.gpx")
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "No tracks with valid date/time information",
+                ):
+                    merge_gpx.merge_gpx_files([missing_path], directory / "b.gpx")
+            self.assertIn("skipped missing.gpx / Missing (track 1)", stderr.getvalue())
 
 
 if __name__ == "__main__":
