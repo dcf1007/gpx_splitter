@@ -1,0 +1,1 @@
+Apply the prepared strict input-mode update.
