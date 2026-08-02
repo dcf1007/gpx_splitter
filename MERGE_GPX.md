@@ -24,17 +24,13 @@ Choose another output path:
 python merge_gpx.py track1.gpx track2.gpx --output results/combined.gpx
 ```
 
-Read every GPX file in a directory:
+Read every GPX file in one directory:
 
 ```bash
 python merge_gpx.py recordings --output combined.gpx
 ```
 
-Include subdirectories:
-
-```bash
-python merge_gpx.py recordings --recursive --output combined.gpx
-```
+The input must be either one directory or one or more explicit GPX files. Mixed inputs, multiple directories, and recursive traversal are rejected.
 
 ## Processing rules
 
@@ -185,7 +181,6 @@ The script refuses to use an input GPX file as its output path, even with `--ove
 
 ```text
 --output PATH
---recursive
 --max-time-gap-hours HOURS
 --max-distance-gap-km KILOMETRES
 --overwrite
