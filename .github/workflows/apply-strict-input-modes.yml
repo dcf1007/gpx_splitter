@@ -28,7 +28,16 @@ jobs:
           replacement = r'message=f"Error: {error}\\n")'.replace(r'\"', '"')
           if original not in text:
               raise RuntimeError('Could not find splitter error-message generator')
-          path.write_text(text.replace(original, replacement, 1), encoding='utf-8')
+          text = text.replace(original, replacement, 1)
+          template_call = '    new_main,\n    splitter,\n'
+          if template_call not in text:
+              raise RuntimeError('Could not find splitter regex replacement argument')
+          text = text.replace(
+              template_call,
+              '    lambda _match: new_main,\n    splitter,\n',
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
           PY
           python .github/apply_strict_inputs.py
 
