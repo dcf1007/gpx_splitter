@@ -1,15 +1,16 @@
 name: Apply strict GPX input modes
 
 on:
-  push:
-    paths:
-      - .github/workflows/apply-strict-input-modes.yml
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   update:
+    if: github.event.issue.title == 'Apply strict input modes'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,3 +31,8 @@ jobs:
           git add -A
           git commit -m "Support directory or file-list inputs"
           git push
+
+      - name: Close trigger issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --comment "Input-mode update applied and validated."
