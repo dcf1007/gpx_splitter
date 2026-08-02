@@ -34,17 +34,13 @@ Analyze several files:
 python identify_trails.py track.gpx track1.gpx "ACTIVE LOG 001.gpx"
 ```
 
-Analyze all GPX files in a directory:
+Analyze all GPX files in one directory:
 
 ```bash
 python identify_trails.py path/to/gpx_directory
 ```
 
-Include subdirectories:
-
-```bash
-python identify_trails.py path/to/gpx_directory --recursive
-```
+The input must be either one directory or one or more explicit GPX files. Mixed inputs, multiple directories, and recursive traversal are rejected.
 
 Show the internal version:
 
@@ -161,7 +157,6 @@ If two input files would produce the same filename in one run, the later file re
 ## Command-line options
 
 ```text
---recursive
 --output-dir PATH
 --overpass-url URL
 --route-match-radius-m METRES

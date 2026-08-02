@@ -206,18 +206,45 @@ def parse_source(path: Path) -> SourceDocument:
     return SourceDocument(path=path, tree=tree)
 
 
-def discover_gpx_files(inputs: Sequence[Path], recursive: bool) -> list[Path]:
-    """Resolve GPX files from explicit files and directories."""
+def discover_gpx_files(inputs: Sequence[Path]) -> list[Path]:
+    """Accept exactly one directory or one or more explicit GPX files."""
 
-    files: set[Path] = set()
-    for input_path in inputs:
-        path = input_path.expanduser()
-        if path.is_file() and path.suffix.lower() == ".gpx":
-            files.add(path.resolve())
-        elif path.is_dir():
-            pattern = "**/*.gpx" if recursive else "*.gpx"
-            files.update(file.resolve() for file in path.glob(pattern))
-    return sorted(files)
+    if not inputs:
+        raise ValueError("Provide one directory or one or more GPX files")
+
+    paths = [path.expanduser() for path in inputs]
+    missing = [path for path in paths if not path.exists()]
+    if missing:
+        names = ", ".join(str(path) for path in missing)
+        raise ValueError(f"Input path does not exist: {names}")
+
+    directories = [path for path in paths if path.is_dir()]
+    if directories:
+        if len(paths) != 1:
+            raise ValueError(
+                "Input must be either one directory or one or more GPX files; "
+                "do not mix files and directories or provide multiple directories"
+            )
+        directory = directories[0]
+        files = sorted(
+            item.resolve()
+            for item in directory.iterdir()
+            if item.is_file() and item.suffix.lower() == ".gpx"
+        )
+        if not files:
+            raise ValueError(f"No GPX files found in directory: {directory}")
+        return files
+
+    invalid_files = [
+        path
+        for path in paths
+        if not path.is_file() or path.suffix.lower() != ".gpx"
+    ]
+    if invalid_files:
+        names = ", ".join(str(path) for path in invalid_files)
+        raise ValueError(f"Explicit inputs must be GPX files: {names}")
+
+    return sorted({path.resolve() for path in paths})
 
 
 def read_all_tracks(paths: Sequence[Path]) -> tuple[list[SourceDocument], list[TrackRecord]]:
@@ -534,7 +561,6 @@ def merge_gpx_files(
     output_path: Path,
     maximum_time_gap_hours: float = DEFAULT_MAX_TIME_GAP_HOURS,
     maximum_distance_gap_km: float = DEFAULT_MAX_DISTANCE_GAP_KM,
-    recursive: bool = False,
     overwrite: bool = False,
 ) -> tuple[Path, list[list[TrackRecord]]]:
     """Read, validate, sort, group, and write tracks from all input GPX files."""
@@ -545,7 +571,7 @@ def merge_gpx_files(
         raise ValueError("maximum_distance_gap_km must be zero or greater")
 
     resolved_output_path = output_path.expanduser().resolve()
-    files = discover_gpx_files(input_paths, recursive)
+    files = discover_gpx_files(input_paths)
     if not files:
         raise ValueError("No GPX input files were found")
     if resolved_output_path in files:
@@ -586,7 +612,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=Path("merged.gpx"),
         help="Output GPX path (default: merged.gpx)",
     )
-    parser.add_argument("--recursive", action="store_true")
     parser.add_argument(
         "--max-time-gap-hours",
         type=float,
@@ -617,7 +642,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_path=arguments.output,
             maximum_time_gap_hours=arguments.max_time_gap_hours,
             maximum_distance_gap_km=arguments.max_distance_gap_km,
-            recursive=arguments.recursive,
             overwrite=arguments.overwrite,
         )
     except (OSError, ValueError, etree.XMLSyntaxError) as error:

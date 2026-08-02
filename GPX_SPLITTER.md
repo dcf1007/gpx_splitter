@@ -40,27 +40,24 @@ Python 3.10 or newer is required.
 
 ## Usage
 
-```bash
-python gpx_splitter.py massive_file.gpx
-```
-
-By default, files are written to `massive_file_split_tracks/` beside the input file.
-
-Explicit hiking defaults and output directory:
+The input must be either one directory containing GPX files or one or more explicit GPX files. Do not mix files and directories or provide multiple directories. Directory input is non-recursive.
 
 ```bash
-python gpx_splitter.py massive_file.gpx \
-  --output-dir split_tracks \
-  --time-gap-hours 1 \
-  --distance-gap-km 10
+python gpx_splitter.py recording.gpx
+python gpx_splitter.py first.gpx second.gpx third.gpx
+python gpx_splitter.py recordings_directory
 ```
 
-The two threshold options can be changed when a different split policy is required.
+Without `--output-dir`, each source uses a sibling `<input_name>_split_tracks/` directory. With one source and `--output-dir`, outputs are written directly there. With several sources, the selected directory contains one source-specific `<input_name>_split_tracks/` subdirectory per GPX file.
+
+```bash
+python gpx_splitter.py recordings_directory   --output-dir split_results   --time-gap-hours 1   --distance-gap-km 10
+```
 
 Replace files from a previous run:
 
 ```bash
-python gpx_splitter.py massive_file.gpx --overwrite
+python gpx_splitter.py recordings_directory --overwrite
 ```
 
 Output names use:
@@ -70,7 +67,7 @@ YYYY-MM-DD_original_track_name_subtrack_number.gpx
 original_track_name_subtrack_number.gpx
 ```
 
-The date is the first valid UTC timestamp in that subtrack. The date prefix is omitted when the subtrack has no valid timestamp. Numbering is continuous for tracks that resolve to the same sanitized filename, preventing accidental collisions when a GPX contains duplicate track names.
+The date is the first valid UTC timestamp in that subtrack. The date prefix is omitted when the subtrack has no valid timestamp. Numbering is continuous for tracks that resolve to the same sanitized filename.
 
 ## Tests
 

@@ -324,15 +324,45 @@ def analyze_track(path: Path) -> TrackAnalysis:
     )
 
 
-def discover_gpx_files(inputs: Sequence[Path], recursive: bool) -> list[Path]:
-    files: set[Path] = set()
-    for path in inputs:
-        if path.is_file() and path.suffix.lower() == ".gpx":
-            files.add(path.resolve())
-        elif path.is_dir():
-            pattern = "**/*.gpx" if recursive else "*.gpx"
-            files.update(item.resolve() for item in path.glob(pattern))
-    return sorted(files)
+def discover_gpx_files(inputs: Sequence[Path]) -> list[Path]:
+    """Accept exactly one directory or one or more explicit GPX files."""
+
+    if not inputs:
+        raise ValueError("Provide one directory or one or more GPX files")
+
+    paths = [path.expanduser() for path in inputs]
+    missing = [path for path in paths if not path.exists()]
+    if missing:
+        names = ", ".join(str(path) for path in missing)
+        raise ValueError(f"Input path does not exist: {names}")
+
+    directories = [path for path in paths if path.is_dir()]
+    if directories:
+        if len(paths) != 1:
+            raise ValueError(
+                "Input must be either one directory or one or more GPX files; "
+                "do not mix files and directories or provide multiple directories"
+            )
+        directory = directories[0]
+        files = sorted(
+            item.resolve()
+            for item in directory.iterdir()
+            if item.is_file() and item.suffix.lower() == ".gpx"
+        )
+        if not files:
+            raise ValueError(f"No GPX files found in directory: {directory}")
+        return files
+
+    invalid_files = [
+        path
+        for path in paths
+        if not path.is_file() or path.suffix.lower() != ".gpx"
+    ]
+    if invalid_files:
+        names = ", ".join(str(path) for path in invalid_files)
+        raise ValueError(f"Explicit inputs must be GPX files: {names}")
+
+    return sorted({path.resolve() for path in paths})
 
 
 # OpenStreetMap matching -------------------------------------------------------
@@ -1095,7 +1125,6 @@ def argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("inputs", nargs="+", type=Path)
-    parser.add_argument("--recursive", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=Path("trail_analysis"))
     parser.add_argument("--overpass-url", action="append", dest="overpass_urls")
     parser.add_argument("--route-match-radius-m", type=float, default=70.0)
@@ -1139,7 +1168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if getattr(arguments, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be greater than zero")
 
-    files = discover_gpx_files(arguments.inputs, arguments.recursive)
+    files = discover_gpx_files(arguments.inputs)
     if not files:
         parser.error("No GPX files found")
 

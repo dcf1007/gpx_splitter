@@ -2,6 +2,8 @@
 
 This repository contains three Python command-line tools for working with GPX tracks.
 
+All three scripts accept exactly one directory or one or more explicit GPX files. Files and directories cannot be mixed, multiple directories are rejected, and directory input is non-recursive.
+
 ## Scripts
 
 ### GPX Track Splitter

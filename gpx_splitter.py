@@ -16,7 +16,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Sequence
 
 from lxml import etree
 
@@ -140,6 +140,100 @@ def sanitize_filename_component(value: str) -> str:
     # Leave room for the date, sequence number, extension, and filesystem limits.
     return sanitized_value[:180].rstrip(" .") or "unnamed_track"
 
+
+def discover_gpx_files(inputs: Sequence[Path]) -> list[Path]:
+    """Accept exactly one directory or one or more explicit GPX files."""
+
+    if not inputs:
+        raise ValueError("Provide one directory or one or more GPX files")
+
+    paths = [path.expanduser() for path in inputs]
+    missing = [path for path in paths if not path.exists()]
+    if missing:
+        names = ", ".join(str(path) for path in missing)
+        raise ValueError(f"Input path does not exist: {names}")
+
+    directories = [path for path in paths if path.is_dir()]
+    if directories:
+        if len(paths) != 1:
+            raise ValueError(
+                "Input must be either one directory or one or more GPX files; "
+                "do not mix files and directories or provide multiple directories"
+            )
+        directory = directories[0]
+        files = sorted(
+            item.resolve()
+            for item in directory.iterdir()
+            if item.is_file() and item.suffix.lower() == ".gpx"
+        )
+        if not files:
+            raise ValueError(f"No GPX files found in directory: {directory}")
+        return files
+
+    invalid_files = [
+        path
+        for path in paths
+        if not path.is_file() or path.suffix.lower() != ".gpx"
+    ]
+    if invalid_files:
+        names = ", ".join(str(path) for path in invalid_files)
+        raise ValueError(f"Explicit inputs must be GPX files: {names}")
+
+    return sorted({path.resolve() for path in paths})
+
+
+
+def plan_output_directories(
+    input_files: Sequence[Path],
+    output_root: Path | None,
+) -> dict[Path, Path]:
+    """Choose one isolated output directory per source GPX file."""
+
+    if output_root is None:
+        return {
+            input_path: input_path.with_name(f"{input_path.stem}_split_tracks")
+            for input_path in input_files
+        }
+
+    root = output_root.expanduser().resolve()
+    if len(input_files) == 1:
+        return {input_files[0]: root}
+
+    planned: dict[Path, Path] = {}
+    used_names: set[str] = set()
+    for input_path in input_files:
+        base_name = f"{sanitize_filename_component(input_path.stem)}_split_tracks"
+        directory_name = base_name
+        suffix = 2
+        while directory_name.casefold() in used_names:
+            directory_name = f"{base_name}_{suffix}"
+            suffix += 1
+        used_names.add(directory_name.casefold())
+        planned[input_path] = root / directory_name
+    return planned
+
+
+def split_gpx_inputs(
+    inputs: Sequence[Path],
+    output_root: Path | None = None,
+    time_gap_hours: float = 1.0,
+    distance_gap_km: float = 10.0,
+    overwrite: bool = False,
+) -> dict[Path, list[Path]]:
+    """Split all files selected by the strict file-or-directory input mode."""
+
+    input_files = discover_gpx_files(inputs)
+    output_directories = plan_output_directories(input_files, output_root)
+    return {
+        input_path: split_gpx_tracks(
+            input_path=input_path,
+            output_directory=output_directories[input_path],
+            time_gap_hours=time_gap_hours,
+            distance_gap_km=distance_gap_km,
+            overwrite=overwrite,
+        )
+        for input_path in input_files
+    }
 
 def read_root_context(input_path: Path) -> RootContext:
     """Read root metadata while deferring included tracks to the split pass."""
@@ -685,20 +779,25 @@ def split_gpx_tracks(
     return written_files
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Split GPX tracks when the UTC date changes, timestamps are far apart, "
             "or untimed consecutive points are separated by a massive distance."
         )
     )
-    parser.add_argument("input_gpx", type=Path, help="Path to the source GPX file.")
+    parser.add_argument(
+        "inputs",
+        nargs="+",
+        type=Path,
+        help="One directory or one or more GPX files.",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
         help=(
-            "Directory for generated files. Defaults to "
-            "<input_name>_split_tracks beside the input file."
+            "Output directory. One source writes directly there; multiple sources "
+            "use separate <name>_split_tracks subdirectories."
         ),
     )
     parser.add_argument(
@@ -721,16 +820,12 @@ def main() -> int:
         action="store_true",
         help="Replace generated GPX files that already exist.",
     )
-    arguments = parser.parse_args()
-
-    output_directory = arguments.output_dir or arguments.input_gpx.with_name(
-        f"{arguments.input_gpx.stem}_split_tracks"
-    )
+    arguments = parser.parse_args(argv)
 
     try:
-        written_files = split_gpx_tracks(
-            input_path=arguments.input_gpx,
-            output_directory=output_directory,
+        outputs_by_input = split_gpx_inputs(
+            inputs=arguments.inputs,
+            output_root=arguments.output_dir,
             time_gap_hours=arguments.time_gap_hours,
             distance_gap_km=arguments.distance_gap_km,
             overwrite=arguments.overwrite,
@@ -738,9 +833,21 @@ def main() -> int:
     except (OSError, ValueError, etree.XMLSyntaxError) as error:
         parser.exit(status=1, message=f"Error: {error}\n")
 
-    print(f"Created {len(written_files)} GPX file(s) in {output_directory.resolve()}")
+    total_outputs = sum(len(paths) for paths in outputs_by_input.values())
+    print(
+        f"Processed {len(outputs_by_input)} GPX input file(s); "
+        f"created {total_outputs} GPX file(s)."
+    )
+    destinations = plan_output_directories(
+        list(outputs_by_input),
+        arguments.output_dir,
+    )
+    for input_path, written_files in outputs_by_input.items():
+        print(
+            f"  {input_path}: {len(written_files)} file(s) in "
+            f"{destinations[input_path].resolve()}"
+        )
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
