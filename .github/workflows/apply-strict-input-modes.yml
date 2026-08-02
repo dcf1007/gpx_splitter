@@ -24,11 +24,11 @@ jobs:
           from pathlib import Path
           path = Path('.github/apply_strict_inputs.py')
           text = path.read_text(encoding='utf-8')
-          text = text.replace(
-              r'message=f"Error: {error}\n")',
-              r'message=f"Error: {error}\\n")',
-          )
-          path.write_text(text, encoding='utf-8')
+          original = r'message=f"Error: {error}\n")'.replace(r'\"', '"')
+          replacement = r'message=f"Error: {error}\\n")'.replace(r'\"', '"')
+          if original not in text:
+              raise RuntimeError('Could not find splitter error-message generator')
+          path.write_text(text.replace(original, replacement, 1), encoding='utf-8')
           PY
           python .github/apply_strict_inputs.py
 
